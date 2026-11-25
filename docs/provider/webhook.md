@@ -162,6 +162,37 @@ data:
 Custom certificate authorities configured with `caBundle` or `caProvider` are used with
 NTLM authentication as well.
 
+### Destination policy
+
+The webhook provider makes requests from the controller pod, so its `url` is also a way
+to reach the network the controller runs in. Two controls limit what it can reach.
+
+**Blocked addresses.** Requests to link-local and cloud metadata addresses are refused:
+`169.254.0.0/16`, `fe80::/10`, `100.100.100.200` and `fd00:ec2::254`. The check runs on
+the address the HTTP client actually dials, so it covers hostnames as well as IP
+literals, and it also covers redirects. A refused request fails reconciliation with
+`webhook destination not allowed`.
+
+**Allowlist.** By default any other host is allowed. Set the controller flag
+`--webhook-provider-allowed-hosts` to restrict destinations to a comma separated list of
+host patterns:
+
+```
+--webhook-provider-allowed-hosts=secrets.example.com,*.svc.example.com
+```
+
+`*` alone allows any host, which is also the default when the flag is unset. An entry of
+`*.svc.example.com` matches subdomains but not `svc.example.com` itself. Helm
+installations can pass the flag through `extraArgs.webhook-provider-allowed-hosts`. A host
+outside the allowlist fails store validation with `webhook destination not allowed`.
+
+Store validation checks `url` as written, before templating. Keep the scheme and host
+literal and template only the path, query or body: a url whose host comes from a template
+is accepted with a warning, and only the request-time checks apply to it.
+
+This is not a replacement for a NetworkPolicy. Pair it with a default-deny egress policy
+that allows only the endpoints your stores need.
+
 ### HTTP response limit
 
 Successful response bodies are limited to 10 MiB. A larger response fails reconciliation

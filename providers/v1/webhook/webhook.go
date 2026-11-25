@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/PaesslerAG/jsonpath"
@@ -90,8 +91,33 @@ func (p *Provider) NewClient(ctx context.Context, store esv1.GenericStore, kube 
 }
 
 // ValidateStore validates the provider-specific store configuration.
-func (p *Provider) ValidateStore(_ esv1.GenericStore) (admission.Warnings, error) {
+func (p *Provider) ValidateStore(store esv1.GenericStore) (admission.Warnings, error) {
+	provider, err := getProvider(store)
+	if err != nil {
+		return nil, err
+	}
+
+	// A templated host cannot be checked before the template is rendered, so
+	// the static check is skipped. The request-time dial guard still applies.
+	if hasTemplatedAuthority(provider.URL) {
+		return admission.Warnings{"webhook url host is templated; destination policy is enforced when the request is made"}, nil
+	}
+
+	if err := webhook.ValidateDestination(provider.URL); err != nil {
+		return nil, err
+	}
 	return nil, nil
+}
+
+// hasTemplatedAuthority reports whether the template action sits in the scheme
+// or host part of the url, where it cannot be checked before rendering.
+func hasTemplatedAuthority(rawURL string) bool {
+	authority := rawURL
+	if _, after, ok := strings.Cut(rawURL, "://"); ok {
+		authority = after
+	}
+	authority, _, _ = strings.Cut(authority, "/")
+	return strings.Contains(authority, "{{")
 }
 
 func getProvider(store esv1.GenericStore) (*webhook.Spec, error) {
@@ -318,6 +344,10 @@ func (w *WebHook) Close(_ context.Context) error {
 func (w *WebHook) Validate() (esv1.ValidationResult, error) {
 	timeout := 15 * time.Second
 	url := w.url
+
+	if err := webhook.ValidateDestination(url); err != nil {
+		return esv1.ValidationResultError, err
+	}
 
 	if err := esutils.NetworkValidate(url, timeout); err != nil {
 		return esv1.ValidationResultError, err

@@ -638,18 +638,28 @@ func encryptAES(password string, plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
+// ErrInvalidCiphertext is returned when an AES payload is too short, is not
+// block aligned, or does not carry valid PKCS#7 padding.
+var ErrInvalidCiphertext = errors.New("invalid ciphertext")
+
 func decryptAES(password string, crypt64 string) (string, error) {
 	if crypt64 == "" {
 		return "", nil
 	}
 
-	key := make([]byte, 32)
-	copy(key, []byte(password))
-
 	crypt, err := base64.StdEncoding.DecodeString(crypt64)
 	if err != nil {
 		return "", err
 	}
+
+	// The IV is the first block. A payload shorter than two blocks carries no
+	// ciphertext, and a payload that is not block aligned cannot be decrypted.
+	if len(crypt) < 2*aes.BlockSize || len(crypt)%aes.BlockSize != 0 {
+		return "", fmt.Errorf("%w: expected at least %d bytes in %d-byte blocks, got %d bytes", ErrInvalidCiphertext, 2*aes.BlockSize, aes.BlockSize, len(crypt))
+	}
+
+	key := make([]byte, 32)
+	copy(key, []byte(password))
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -662,5 +672,30 @@ func decryptAES(password string, crypt64 string) (string, error) {
 	mode := cipher.NewCBCDecrypter(block, iv)
 	mode.CryptBlocks(decrypted, crypt)
 
-	return string(decrypted[:len(decrypted)-int(decrypted[len(decrypted)-1])]), nil
+	unpadded, err := pkcs7Unpad(decrypted, aes.BlockSize)
+	if err != nil {
+		return "", err
+	}
+	return string(unpadded), nil
+}
+
+// pkcs7Unpad validates and removes PKCS#7 padding. It rejects a padding byte
+// the ciphertext cannot have produced instead of trimming whatever byte it
+// finds at the end, which can slice past the start of the buffer.
+func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
+	if len(data) == 0 || len(data)%blockSize != 0 {
+		return nil, fmt.Errorf("%w: decrypted data is not block aligned", ErrInvalidCiphertext)
+	}
+
+	padding := int(data[len(data)-1])
+	if padding == 0 || padding > blockSize || padding > len(data) {
+		return nil, fmt.Errorf("%w: invalid padding length %d", ErrInvalidCiphertext, padding)
+	}
+	for _, b := range data[len(data)-padding:] {
+		if int(b) != padding {
+			return nil, fmt.Errorf("%w: inconsistent padding bytes", ErrInvalidCiphertext)
+		}
+	}
+
+	return data[:len(data)-padding], nil
 }

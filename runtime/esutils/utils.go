@@ -541,14 +541,24 @@ func NetworkValidate(endpoint string, timeout time.Duration) error {
 	}
 
 	host := hostname.Hostname()
-	port := hostname.Port()
-
-	if port == "" {
-		port = "443"
+	if host == "" {
+		return fmt.Errorf("could not parse url: missing host in %q", endpoint)
 	}
 
-	url := fmt.Sprintf("%v:%v", host, port)
-	conn, err := net.DialTimeout("tcp", url, timeout)
+	port := hostname.Port()
+	if port == "" {
+		// Derive the port from the scheme instead of always probing 443, which
+		// dialled the wrong port for plain HTTP endpoints.
+		switch strings.ToLower(hostname.Scheme) {
+		case "http":
+			port = "80"
+		default:
+			port = "443"
+		}
+	}
+
+	address := net.JoinHostPort(host, port)
+	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return fmt.Errorf("error accessing external store: %w", err)
 	}

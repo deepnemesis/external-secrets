@@ -7,6 +7,14 @@ an error instead of being loaded into controller memory. Configure the limit in 
 the controller's `--webhook-provider-max-response-size` flag. Helm installations can pass
 the flag through `extraArgs.webhook-provider-max-response-size`.
 
+## Destination Policy
+
+The generator uses the same HTTP client as the webhook provider, so it is subject to the
+same destination policy: link-local and cloud metadata addresses are always refused, and
+the controller flag `--webhook-provider-allowed-hosts` restricts the hosts it may call
+when it is set. See the [webhook provider documentation](../../provider/webhook.md) for
+the accepted patterns.
+
 ## Output Keys and Values
 
 Webhook calls are expected to produce valid JSON objects. All keys within that JSON object will be exported as keys to the kubernetes Secret.

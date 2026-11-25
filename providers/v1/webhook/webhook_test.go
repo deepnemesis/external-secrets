@@ -830,6 +830,36 @@ func TestDeleteSecret(t *testing.T) {
 	}
 }
 
+func TestValidateStoreDestinationPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		wantErr     bool
+		wantWarning bool
+	}{
+		{name: "https host", url: "https://secrets.example.com/v1/secret"},
+		{name: "templated path", url: "https://secrets.example.com/{{ .remoteRef.key }}"},
+		{name: "templated host warns", url: "https://{{ .auth.host }}/v1/secret", wantWarning: true},
+		{name: "link local metadata", url: "http://169.254.169.254/latest/meta-data/", wantErr: true},
+		{name: "alibaba metadata", url: "http://100.100.100.200/", wantErr: true},
+		{name: "unsupported scheme", url: "file:///etc/passwd", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := makeClusterSecretStore("", args{URL: tt.url})
+			warnings, err := (&Provider{}).ValidateStore(store)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateStore() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if (len(warnings) > 0) != tt.wantWarning {
+				t.Fatalf("ValidateStore() warnings = %v, wantWarning %v", warnings, tt.wantWarning)
+			}
+		})
+	}
+}
+
 func TestGetAllSecrets(t *testing.T) {
 	store := makeClusterSecretStore("http://fake-url", args{URL: "/api/secret"})
 	prov := &Provider{}
